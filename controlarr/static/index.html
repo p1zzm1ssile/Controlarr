@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Controlarr</title>
 <meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/png" href="/logo.png">
 <style>
   :root {
     --bg: #f5f6f8; --panel: #ffffff; --text: #1b1f24; --muted: #5d6673;
@@ -35,6 +36,7 @@
          font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
            padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  header .logo { border-radius: 8px; margin-right: -6px; }
   header h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
   header .meta { color: var(--muted); font-size: 13px; }
   header .spacer { flex: 1; }
@@ -106,6 +108,7 @@
 </head>
 <body>
 <header>
+  <img src="/logo.png" alt="" class="logo" width="36" height="36">
   <h1>Controlarr</h1>
   <span class="meta" id="clock"></span>
   <span class="spacer"></span>

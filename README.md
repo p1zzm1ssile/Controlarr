@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.png" alt="Controlarr logo" width="240"></p>
+
 # Controlarr
 
 Stop, start and restart your Docker containers at set times of day. Handy for
