@@ -1,0 +1,16 @@
+# Schedules for containers you don't want to (or can't) add labels to.
+# Copy this file to schedules.yml. Times are 24-hour HH:MM in the TZ of
+# the controlarr container. "days" is optional and defaults to every day.
+containers:
+  plex:
+    stop: "01:30"
+    start: "08:00"
+
+  qbittorrent:
+    restart: "04:00"
+    days: sun
+
+  jellyfin:
+    # Different times on different days: put the days before the time.
+    stop: "mon-fri 23:00, sat-sun 01:00"
+    start: "06:00"
