@@ -6,6 +6,23 @@ the morning.
 
 Schedules use the plain 24-hour clock (`02:00`, `07:30`, `23:45`). No cron.
 
+## Install
+
+```sh
+git clone https://github.com/p1zzm1ssile/controlarr.git
+cd controlarr
+cp docker-compose.example.yml docker-compose.yml   # then edit TZ and your containers
+docker compose up -d --build controlarr
+```
+
+Then open `http://your-server:8080`.
+
+To update later:
+
+```sh
+cd controlarr && git pull && docker compose up -d --build controlarr
+```
+
 ## Quick start
 
 ```yaml
@@ -28,6 +45,22 @@ services:
 ```
 
 Sonarr now stops at 02:00 and starts at 07:00 every day, London time.
+
+## Web page
+
+Open `http://your-server:8080` to see every container, its schedule, what
+happens next and the start order. Click **Schedule** or **Edit** on a
+container to set its times, days, load order and wait, or **Start now** /
+**Stop now** to act straight away. The page has light and dark modes (Auto
+follows your device).
+
+Schedules added on the page are saved to `/config/schedules.yml`, so mount
+`/config` to keep them. Schedules set with labels show on the page but can
+only be changed in the labels.
+
+Anyone who can open the page can stop and start your containers, so set
+`CONTROLARR_WEB_PASSWORD` if it's reachable by anyone but you (the username
+can be anything). Set `CONTROLARR_WEB_PORT=0` to turn the page off.
 
 ## Setting a schedule
 
@@ -124,6 +157,8 @@ Quote the times in YAML (`"01:30"`), otherwise YAML may read them as numbers.
 | `CONTROLARR_HEALTH_TIMEOUT` | `300` | Longest wait for a healthcheck to pass |
 | `CONTROLARR_CONFIG` | `/config/schedules.yml` | Path to the optional schedule file |
 | `CONTROLARR_LOG_LEVEL` | `INFO` | Log detail |
+| `CONTROLARR_WEB_PORT` | `8080` | Port for the web page (`0` turns it off) |
+| `CONTROLARR_WEB_PASSWORD` | (none) | Password for the web page |
 
 ## Good to know
 

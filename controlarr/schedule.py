@@ -114,10 +114,25 @@ class Rule:
     def describe(self) -> str:
         if self.days == ALL_DAYS:
             d = "every day"
+        elif self.days == DAY_GROUPS["weekdays"]:
+            d = "weekdays"
+        elif self.days == DAY_GROUPS["weekends"]:
+            d = "weekends"
         else:
             names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
             d = ",".join(names[i] for i in sorted(self.days))
         return f"{self.at:%H:%M} {d}"
+
+    def next_after(self, now: datetime) -> datetime | None:
+        """The next time this rule fires after now."""
+        day = now.date()
+        for _ in range(8):
+            if day.weekday() in self.days:
+                at = datetime.combine(day, self.at, tzinfo=now.tzinfo)
+                if at > now:
+                    return at
+            day += timedelta(days=1)
+        return None
 
     def is_due(self, since: datetime, now: datetime) -> bool:
         """True if this time falls in the window (since, now]."""
@@ -155,12 +170,23 @@ def _make_rules(container: str, mapping: Mapping[str, object], source: str,
     for action in ACTIONS:
         if action not in mapping or mapping[action] in (None, ""):
             continue
+        value = mapping[action]
+        if isinstance(value, int) and not isinstance(value, bool):
+            # YAML reads an unquoted 23:30 as the number 1410 (minutes).
+            value = f"{value // 60:02d}:{value % 60:02d}"
         try:
-            for at, days in parse_times(str(mapping[action]), default_days):
+            for at, days in parse_times(str(value), default_days):
                 rules.append(Rule(container, action, at, days, source, order, delay))
         except ScheduleError as e:
             errors.append(f"{container}: {action}: {e}")
     return rules
+
+
+def validate_entry(container: str, mapping: Mapping[str, object]) -> list[str]:
+    """Check one container's settings; returns a list of problems."""
+    errors: list[str] = []
+    _make_rules(container, mapping, "config", errors)
+    return errors
 
 
 def rules_from_labels(container: str, labels: Mapping[str, str],

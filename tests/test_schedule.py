@@ -105,3 +105,10 @@ def test_bad_order_and_delay_reported():
     rules_from_labels("x", {"controlarr.start": "07:00", "controlarr.order": "first",
                             "controlarr.delay": "soon"}, errors)
     assert len(errors) == 2
+
+
+def test_unquoted_yaml_time():
+    import yaml
+    config = yaml.safe_load("containers:\n  plex:\n    stop: 23:30\n    start: 07:00\n")
+    rules = rules_from_config(config, [])
+    assert sorted((r.action, r.at) for r in rules) == [("start", time(7, 0)), ("stop", time(23, 30))]

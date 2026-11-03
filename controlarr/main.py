@@ -17,6 +17,7 @@ import yaml
 from docker.errors import APIError, NotFound
 
 from .delays import suggest_delay
+from .web import start_web
 from .schedule import (ACTION_ORDER, Rule, due_rules, rules_from_config,
                        rules_from_labels)
 
@@ -36,6 +37,9 @@ class Settings:
         self.health_timeout = int(env.get("CONTROLARR_HEALTH_TIMEOUT", "300"))
         self.tz = ZoneInfo(env.get("TZ", "UTC"))
         self.log_level = env.get("CONTROLARR_LOG_LEVEL", "INFO").upper()
+        # Web page for viewing and editing schedules. 0 turns it off.
+        self.web_port = int(env.get("CONTROLARR_WEB_PORT", "8080"))
+        self.web_password = env.get("CONTROLARR_WEB_PASSWORD", "")
 
 
 def own_container_id() -> str | None:
@@ -116,7 +120,8 @@ def run_action(client, rule: Rule, settings: Settings):
         log.info("%s: already running, nothing to start", c.name)
         return None
     prefix = "[dry run] would " if settings.dry_run else ""
-    log.info("%s%s %s (%s, from %s)", prefix, rule.action, c.name, rule.describe(), rule.source)
+    when = "now" if rule.source == "web page" else rule.describe()
+    log.info("%s%s %s (%s, from %s)", prefix, rule.action, c.name, when, rule.source)
     if settings.dry_run:
         return c if rule.action != "stop" else None
     try:
@@ -192,6 +197,8 @@ def main(argv=None) -> None:
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
+
+    start_web(client, settings, own_container_id())
 
     last_errors: set[str] = set()
     last = datetime.now(settings.tz)

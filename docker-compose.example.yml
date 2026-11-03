@@ -5,7 +5,10 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Europe/London            # times below are in this timezone
+      # - CONTROLARR_WEB_PASSWORD=changeme   # recommended if the page is reachable by others
       # - CONTROLARR_DRY_RUN=true   # log what would happen without doing it
+    ports:
+      - 8080:8080                   # web page: http://your-server:8080
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config:/config            # optional schedules.yml lives here
