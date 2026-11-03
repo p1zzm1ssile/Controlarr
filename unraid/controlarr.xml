@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>controlarr</Name>
+  <Repository>ghcr.io/p1zzm1ssile/controlarr:latest</Repository>
+  <Registry>https://github.com/p1zzm1ssile/controlarr/pkgs/container/controlarr</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/p1zzm1ssile/controlarr/issues</Support>
+  <Project>https://github.com/p1zzm1ssile/controlarr</Project>
+  <Overview>Stops, starts and restarts your other containers at set times of day, using the 24-hour clock. When several start together they go one at a time in your chosen order, with a wait after each, so they don't all hit the CPU, RAM and disks at once. Set schedules on the web page (light and dark modes) or with container labels.</Overview>
+  <Category>Tools: Status:Stable</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/p1zzm1ssile/controlarr/main/unraid/controlarr.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/p1zzm1ssile/controlarr/main/unraid/icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <Requires/>
+  <Config Name="Web page port" Target="8080" Default="8484" Mode="tcp" Description="Port for the Controlarr web page." Type="Port" Display="always" Required="true" Mask="false">8484</Config>
+  <Config Name="Config folder" Target="/config" Default="/mnt/user/appdata/controlarr" Mode="rw" Description="Where schedules.yml is kept. Schedules you set on the web page are saved here." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/controlarr</Config>
+  <Config Name="Docker socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="rw" Description="Lets Controlarr stop and start your containers. Don't change this." Type="Path" Display="advanced" Required="true" Mask="false">/var/run/docker.sock</Config>
+  <Config Name="Web page password" Target="CONTROLARR_WEB_PASSWORD" Default="" Mode="" Description="Optional. Anyone who can open the page can stop and start your containers, so set one if others are on your network. Any username works." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Default wait after start (seconds)" Target="CONTROLARR_START_DELAY" Default="30" Mode="" Description="Wait after starting an app Controlarr doesn't recognise, before starting the next one." Type="Variable" Display="advanced" Required="false" Mask="false">30</Config>
+  <Config Name="Longest healthcheck wait (seconds)" Target="CONTROLARR_HEALTH_TIMEOUT" Default="300" Mode="" Description="For containers with a healthcheck, the longest to wait for them to become healthy." Type="Variable" Display="advanced" Required="false" Mask="false">300</Config>
+  <Config Name="Dry run" Target="CONTROLARR_DRY_RUN" Default="false" Mode="" Description="true = only log what would happen, don't stop or start anything." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+</Container>
