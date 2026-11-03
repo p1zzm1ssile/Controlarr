@@ -1,0 +1,229 @@
+"""Controlarr: start, stop and restart Docker containers at set times of day."""
+from __future__ import annotations
+
+import logging
+import os
+import signal
+import socket
+import sys
+import threading
+import time as _time
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import docker
+import yaml
+from docker.errors import APIError, NotFound
+
+from .delays import suggest_delay
+from .web import start_web
+from .schedule import (ACTION_ORDER, Rule, due_rules, rules_from_config,
+                       rules_from_labels)
+
+log = logging.getLogger("controlarr")
+
+
+class Settings:
+    def __init__(self, env=os.environ):
+        self.config_path = Path(env.get("CONTROLARR_CONFIG", "/config/schedules.yml"))
+        self.poll_seconds = int(env.get("CONTROLARR_POLL_SECONDS", "30"))
+        self.dry_run = env.get("CONTROLARR_DRY_RUN", "false").lower() in ("1", "true", "yes")
+        self.stop_timeout = int(env.get("CONTROLARR_STOP_TIMEOUT", "30"))
+        # Wait after starting a container that isn't a known app and has no
+        # healthcheck or controlarr.delay label.
+        self.start_delay = int(env.get("CONTROLARR_START_DELAY", "30"))
+        # Longest to wait for a container's healthcheck to report healthy.
+        self.health_timeout = int(env.get("CONTROLARR_HEALTH_TIMEOUT", "300"))
+        self.tz = ZoneInfo(env.get("TZ", "UTC"))
+        self.log_level = env.get("CONTROLARR_LOG_LEVEL", "INFO").upper()
+        # Web page for viewing and editing schedules. 0 turns it off.
+        self.web_port = int(env.get("CONTROLARR_WEB_PORT", "8080"))
+        self.web_password = env.get("CONTROLARR_WEB_PASSWORD", "")
+
+
+def own_container_id() -> str | None:
+    # Inside Docker the hostname defaults to the short container id.
+    return socket.gethostname() or None
+
+
+def collect_rules(client, settings: Settings) -> tuple[list[Rule], list[str]]:
+    errors: list[str] = []
+    rules: list[Rule] = []
+    me = own_container_id()
+    # all=True so stopped containers (the ones we need to start) are included.
+    for c in client.containers.list(all=True):
+        if me and c.id.startswith(me):
+            continue
+        rules.extend(rules_from_labels(c.name, c.labels or {}, errors))
+    if settings.config_path.exists():
+        try:
+            config = yaml.safe_load(settings.config_path.read_text()) or {}
+            rules.extend(rules_from_config(config, errors))
+        except yaml.YAMLError as e:
+            errors.append(f"{settings.config_path}: {e}")
+    return rules, errors
+
+
+def has_healthcheck(container) -> bool:
+    test = (container.attrs.get("Config", {}).get("Healthcheck") or {}).get("Test") or []
+    return bool(test) and test[0] != "NONE"
+
+
+def plan_wait(rule: Rule, container, settings: Settings) -> tuple[str, int, str]:
+    """How to wait after this container starts: ("fixed"|"health", seconds, why)."""
+    if rule.delay is not None:
+        return "fixed", rule.delay, "set by controlarr.delay"
+    if container is not None and has_healthcheck(container):
+        return "health", settings.health_timeout, "waits for its healthcheck"
+    image = container.attrs.get("Config", {}).get("Image", "") if container else ""
+    seconds, why = suggest_delay(image, settings.start_delay)
+    return "fixed", seconds, f"suggested: {why}"
+
+
+def wait_after_start(rule: Rule, container, settings: Settings,
+                     stop: threading.Event) -> None:
+    kind, seconds, why = plan_wait(rule, container, settings)
+    if seconds <= 0:
+        return
+    if kind == "fixed" or settings.dry_run:
+        log.info("waiting %ss after %s (%s)", seconds, rule.container, why)
+        stop.wait(seconds)
+        return
+    log.info("waiting for %s to be healthy (up to %ss)", rule.container, seconds)
+    deadline = _time.monotonic() + seconds
+    while not stop.is_set() and _time.monotonic() < deadline:
+        container.reload()
+        health = (container.attrs.get("State", {}).get("Health") or {}).get("Status")
+        if health == "healthy":
+            log.info("%s is healthy", rule.container)
+            return
+        if container.status not in ("running", "restarting"):
+            log.warning("%s is %s, not waiting for it", rule.container, container.status)
+            return
+        stop.wait(5)
+    log.warning("%s not healthy after %ss, carrying on", rule.container, seconds)
+
+
+def run_action(client, rule: Rule, settings: Settings):
+    """Carry out one rule. Returns the container if it was started or restarted."""
+    try:
+        c = client.containers.get(rule.container)
+    except NotFound:
+        log.warning("%s: container not found, skipping %s", rule.container, rule.action)
+        return None
+    status = c.status
+    if rule.action == "stop" and status not in ("running", "restarting", "paused"):
+        log.info("%s: already %s, nothing to stop", c.name, status)
+        return None
+    if rule.action == "start" and status == "running":
+        log.info("%s: already running, nothing to start", c.name)
+        return None
+    prefix = "[dry run] would " if settings.dry_run else ""
+    when = "now" if rule.source == "web page" else rule.describe()
+    log.info("%s%s %s (%s, from %s)", prefix, rule.action, c.name, when, rule.source)
+    if settings.dry_run:
+        return c if rule.action != "stop" else None
+    try:
+        if rule.action == "stop":
+            c.stop(timeout=settings.stop_timeout)
+        elif rule.action == "start":
+            c.start()
+        elif rule.action == "restart":
+            c.restart(timeout=settings.stop_timeout)
+    except APIError as e:
+        log.error("%s: %s failed: %s", c.name, rule.action, e)
+        return None
+    return c if rule.action != "stop" else None
+
+
+def run_batch(client, rules: list[Rule], settings: Settings, stop: threading.Event) -> None:
+    """Run due rules in order. Stops go first; starts are staggered one by one."""
+    pending_wait = None
+    for rule in rules:
+        if stop.is_set():
+            return
+        if rule.action != "stop" and pending_wait:
+            wait_after_start(*pending_wait, settings, stop)
+            pending_wait = None
+            if stop.is_set():
+                return
+        started = run_action(client, rule, settings)
+        if started is not None:
+            pending_wait = (rule, started)
+
+
+def print_plan(client, settings: Settings) -> None:
+    """Show each container's schedule, start order and wait, for tuning."""
+    rules, errors = collect_rules(client, settings)
+    starts = sorted((r for r in rules if r.action != "stop"),
+                    key=lambda r: (r.order, r.container, ACTION_ORDER[r.action]))
+    stops = [r for r in rules if r.action == "stop"]
+    print(f"Timezone {settings.tz}\n")
+    if stops:
+        print("Stops")
+        for r in sorted(stops, key=lambda r: (r.at, r.container)):
+            print(f"  {r.container:<24} {r.describe()}")
+        print()
+    if starts:
+        print("Starts and restarts, in load order (lower order goes first)")
+        print(f"  {'order':>5}  {'container':<24} {'action':<8} {'when':<26} wait after")
+        for r in starts:
+            try:
+                c = client.containers.get(r.container)
+            except NotFound:
+                c = None
+            kind, secs, why = plan_wait(r, c, settings)
+            wait = f"until healthy (max {secs}s)" if kind == "health" else f"{secs}s"
+            print(f"  {r.order:>5}  {r.container:<24} {r.action:<8} {r.describe():<26} {wait}, {why}")
+        print("\nOnly containers due at the same time are staggered. Change the order "
+              "with controlarr.order and the wait with controlarr.delay.")
+    if errors:
+        print("\nProblems")
+        for e in errors:
+            print(f"  {e}")
+
+
+def main(argv=None) -> None:
+    argv = sys.argv[1:] if argv is None else argv
+    settings = Settings()
+    logging.basicConfig(level=settings.log_level,
+                        format="%(asctime)s %(levelname)s %(message)s")
+    client = docker.from_env()
+    if argv[:1] == ["plan"]:
+        print_plan(client, settings)
+        return
+
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+
+    start_web(client, settings, own_container_id())
+
+    last_errors: set[str] = set()
+    last = datetime.now(settings.tz)
+    rules, _ = collect_rules(client, settings)
+    log.info("controlarr started (tz=%s, dry_run=%s), %d schedule(s) found",
+             settings.tz, settings.dry_run, len(rules))
+    for r in rules:
+        log.info("  %s: %s at %s (%s)", r.container, r.action, r.describe(), r.source)
+
+    while not stop.wait(settings.poll_seconds):
+        now = datetime.now(settings.tz)
+        try:
+            rules, errors = collect_rules(client, settings)
+        except Exception as e:  # Docker daemon unreachable etc.
+            log.error("could not read schedules: %s", e)
+            continue
+        for err in set(errors) - last_errors:
+            log.warning(err)
+        last_errors = set(errors)
+        # Anything that comes due while a staggered batch is running is picked
+        # up on the next check, because the window starts at this check's time.
+        run_batch(client, due_rules(rules, last, now), settings, stop)
+        last = now
+    log.info("controlarr stopping")
+
+
+if __name__ == "__main__":
+    main()
