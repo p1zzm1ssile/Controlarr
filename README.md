@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.png" alt="Controlarr logo" width="240"></p>
+
 # Controlarr
 
 Stop, start and restart your Docker containers at set times of day. Handy for
@@ -6,7 +8,27 @@ the morning.
 
 Schedules use the plain 24-hour clock (`02:00`, `07:30`, `23:45`). No cron.
 
-## Install
+## Install on Unraid
+
+1. Open the Unraid terminal (the `>_` icon at the top right) and run:
+
+   ```sh
+   wget -O /boot/config/plugins/dockerMan/templates-user/my-controlarr.xml \
+     https://raw.githubusercontent.com/p1zzm1ssile/controlarr/main/unraid/controlarr.xml
+   ```
+
+2. Go to the **Docker** tab, click **Add Container**, and pick **controlarr**
+   from the **Template** list.
+3. Check the settings (the web page uses port 8484 by default) and click **Apply**.
+4. Click the Controlarr icon on the Docker tab and choose **WebUI**, then click
+   **Schedule** next to any container to set its times.
+
+Unraid passes your server's timezone to Controlarr automatically. To update,
+use **Check for Updates** on the Docker tab as with any other container.
+
+## Install with Docker Compose
+
+The image is published at `ghcr.io/p1zzm1ssile/controlarr:latest`. Or build it yourself:
 
 ```sh
 git clone https://github.com/p1zzm1ssile/controlarr.git
@@ -28,7 +50,7 @@ cd controlarr && git pull && docker compose up -d --build controlarr
 ```yaml
 services:
   controlarr:
-    image: controlarr        # or build: .
+    image: ghcr.io/p1zzm1ssile/controlarr:latest   # or build: .
     container_name: controlarr
     restart: unless-stopped
     environment:

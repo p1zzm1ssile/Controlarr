@@ -27,6 +27,7 @@ log = logging.getLogger("controlarr.web")
 
 FIELDS = ("stop", "start", "restart", "days", "order", "delay")
 INDEX_HTML = Path(__file__).with_name("static").joinpath("index.html")
+LOGO_PNG = Path(__file__).with_name("static").joinpath("logo.png")
 _config_lock = threading.Lock()
 
 
@@ -224,6 +225,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path in ("/", "/index.html"):
             self._send(200, INDEX_HTML.read_bytes(), "text/html; charset=utf-8")
+        elif self.path in ("/logo.png", "/favicon.ico"):
+            self._send(200, LOGO_PNG.read_bytes(), "image/png")
         elif self.path == "/api/state":
             a = self.app
             try:
