@@ -10,11 +10,16 @@ Schedules use the plain 24-hour clock (`02:00`, `07:30`, `23:45`). No cron.
 
 ## Install on Unraid
 
+The easiest way: open the **Apps** tab (Community Applications), search for
+**Controlarr** and click **Install**.
+
+To add it by hand instead:
+
 1. Open the Unraid terminal (the `>_` icon at the top right) and run:
 
    ```sh
    wget -O /boot/config/plugins/dockerMan/templates-user/my-controlarr.xml \
-     https://raw.githubusercontent.com/p1zzm1ssile/controlarr/main/unraid/controlarr.xml
+     https://raw.githubusercontent.com/p1zzm1ssile/unraid-templates/main/templates/controlarr.xml
    ```
 
 2. Go to the **Docker** tab, click **Add Container**, and pick **controlarr**
