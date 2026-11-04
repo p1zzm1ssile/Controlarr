@@ -2,17 +2,17 @@
 <Container version="2">
   <Name>controlarr</Name>
   <Repository>ghcr.io/p1zzm1ssile/controlarr:latest</Repository>
-  <Registry>https://github.com/p1zzm1ssile/controlarr/pkgs/container/controlarr</Registry>
+  <Registry>https://github.com/p1zzm1ssile/Controlarr/pkgs/container/controlarr</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/p1zzm1ssile/controlarr/issues</Support>
-  <Project>https://github.com/p1zzm1ssile/controlarr</Project>
-  <Overview>Stops, starts and restarts your other containers at set times of day, using the 24-hour clock. When several start together they go one at a time in your chosen order, with a wait after each, so they don't all hit the CPU, RAM and disks at once. Set schedules on the web page (light and dark modes) or with container labels.</Overview>
-  <Category>Tools: Status:Stable</Category>
+  <Support>https://github.com/p1zzm1ssile/Controlarr/issues</Support>
+  <Project>https://github.com/p1zzm1ssile/Controlarr</Project>
+  <Overview>Stops, starts and restarts your other containers at set times of day, using the 24-hour clock. When several start together they go one at a time in your chosen order, with a wait after each, so they don't all hit the CPU, RAM and disks at once. Set schedules on the web page (light and dark modes) or with container labels. Needs the Docker socket so it can stop and start containers. Free forever: no paid tiers, no Pro account, no subscriptions.</Overview>
+  <Category>Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/p1zzm1ssile/controlarr/main/unraid/controlarr.xml</TemplateURL>
+  <TemplateURL>https://raw.githubusercontent.com/p1zzm1ssile/unraid-templates/main/templates/controlarr.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/p1zzm1ssile/controlarr/main/unraid/icon.png</Icon>
   <ExtraParams/>
   <PostArgs/>
