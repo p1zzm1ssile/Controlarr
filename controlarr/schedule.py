@@ -237,10 +237,16 @@ def rules_from_config(config: Mapping | None, errors: list[str]) -> list[Rule]:
 def due_rules(rules: Iterable[Rule], since: datetime, now: datetime) -> list[Rule]:
     due = [r for r in rules if r.is_due(since, now)]
     # De-duplicate (same container+action from label and config) and order:
-    # all stops first, then restarts and starts by their "order" value.
+    # all stops first, highest "order" first (the reverse of starting, so apps
+    # stop before the VPN or database they rely on), then restarts and starts
+    # lowest "order" first.
+    def key(r):
+        is_stop = r.action == "stop"
+        return (not is_stop, -r.order if is_stop else r.order, r.container,
+                ACTION_ORDER[r.action])
+
     seen, out = set(), []
-    for r in sorted(due, key=lambda r: (ACTION_ORDER[r.action] > 0, r.order,
-                                        r.container, ACTION_ORDER[r.action])):
+    for r in sorted(due, key=key):
         key = (r.container, r.action)
         if key not in seen:
             seen.add(key)

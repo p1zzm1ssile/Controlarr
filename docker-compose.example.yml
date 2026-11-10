@@ -1,12 +1,14 @@
 services:
   controlarr:
-    build: .
+    image: ghcr.io/p1zzm1ssile/controlarr:latest
+    # build: .                      # or build it yourself from this folder
     container_name: controlarr
     restart: unless-stopped
     environment:
       - TZ=Europe/London            # times below are in this timezone
       # - CONTROLARR_WEB_PASSWORD=changeme   # recommended if the page is reachable by others
       # - CONTROLARR_DRY_RUN=true   # log what would happen without doing it
+      # - CONTROLARR_NOTIFY_URL=https://ntfy.sh/my-controlarr   # alerts (or a Discord webhook)
     ports:
       - 8080:8080                   # web page: http://your-server:8080
     volumes:

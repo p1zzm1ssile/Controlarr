@@ -10,6 +10,15 @@
   <Support>https://github.com/p1zzm1ssile/Controlarr/issues</Support>
   <Project>https://github.com/p1zzm1ssile/Controlarr</Project>
   <Overview>Stops, starts and restarts your other containers at set times of day, using the 24-hour clock. When several start together they go one at a time in your chosen order, with a wait after each, so they don't all hit the CPU, RAM and disks at once. Set schedules on the web page (light and dark modes) or with container labels. Needs the Docker socket so it can stop and start containers. Free forever: no paid tiers, no Pro account, no subscriptions.</Overview>
+  <Changes>
+### 0.2.0 (2026-11-10)
+- Catches up after a reboot: containers with both a stop and a start time are put back into the state their schedule says.
+- Pause a schedule, or skip just its next time, from the web page.
+- Recent activity on the web page, and optional alerts to Discord or ntfy.
+- Stops now go in reverse load order.
+- Fixed load order 0 being ignored, and times running twice when the clocks go back.
+- Container healthcheck.
+  </Changes>
   <Category>Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/p1zzm1ssile/unraid-templates/main/templates/controlarr.xml</TemplateURL>
@@ -22,6 +31,7 @@
   <Config Name="Config folder" Target="/config" Default="/mnt/user/appdata/controlarr" Mode="rw" Description="Where schedules.yml is kept. Schedules you set on the web page are saved here." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/controlarr</Config>
   <Config Name="Docker socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="rw" Description="Lets Controlarr stop and start your containers. Don't change this." Type="Path" Display="advanced" Required="true" Mask="false">/var/run/docker.sock</Config>
   <Config Name="Web page password" Target="CONTROLARR_WEB_PASSWORD" Default="" Mode="" Description="Optional. Anyone who can open the page can stop and start your containers, so set one if others are on your network. Any username works." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Alert URL" Target="CONTROLARR_NOTIFY_URL" Default="" Mode="" Description="Optional. A Discord webhook or an ntfy topic URL (for example https://ntfy.sh/my-controlarr). You get a message when a container fails to stop or start." Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="Default wait after start (seconds)" Target="CONTROLARR_START_DELAY" Default="30" Mode="" Description="Wait after starting an app Controlarr doesn't recognise, before starting the next one." Type="Variable" Display="advanced" Required="false" Mask="false">30</Config>
   <Config Name="Longest healthcheck wait (seconds)" Target="CONTROLARR_HEALTH_TIMEOUT" Default="300" Mode="" Description="For containers with a healthcheck, the longest to wait for them to become healthy." Type="Variable" Display="advanced" Required="false" Mask="false">300</Config>
   <Config Name="Catch up on start" Target="CONTROLARR_CATCH_UP" Default="true" Mode="" Description="true = when Controlarr starts (for example after a reboot), stop or start containers that have both a stop and a start time so they match their schedule." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>

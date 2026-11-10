@@ -21,6 +21,8 @@ from urllib.parse import urlsplit
 import yaml
 from docker.errors import NotFound
 
+from .activity import ACTIVITY
+from .holds import Holds
 from .schedule import (ACTIONS, LABEL_PREFIX, rules_from_config,
                        rules_from_labels, validate_entry)
 
@@ -98,6 +100,7 @@ def build_state(client, settings, own_id) -> dict:
         config = {"containers": {}}
         errors.append(f"{settings.config_path}: {e}")
     config_entries = config.get("containers") or {}
+    holds = Holds(settings.state_path).snapshot()
 
     rows = []
     seen = set()
@@ -113,14 +116,14 @@ def build_state(client, settings, own_id) -> dict:
         health = (c.attrs.get("State", {}).get("Health") or {}).get("Status")
         rows.append(_row(c.name, c.attrs.get("Config", {}).get("Image", ""), c.status,
                          health, _labels_entry(labels), entry, rules, c, settings,
-                         now, plan_wait))
+                         now, plan_wait, holds))
 
     for name, entry in config_entries.items():
         if name in seen or not isinstance(entry, dict):
             continue
         rules = rules_from_config({"containers": {name: entry}}, errors)
         rows.append(_row(name, "", "missing", None, {}, entry, rules, None,
-                         settings, now, plan_wait))
+                         settings, now, plan_wait, holds))
 
     rows.sort(key=lambda r: (not r["scheduled"], r["order"], r["name"]))
     return {
@@ -130,16 +133,36 @@ def build_state(client, settings, own_id) -> dict:
         "config_path": str(settings.config_path),
         "errors": sorted(set(errors)),
         "containers": rows,
+        "activity": ACTIVITY.recent(30),
     }
 
 
-def _row(name, image, status, health, label_entry, config_entry, rules,
-         container, settings, now, plan_wait) -> dict:
+def next_scheduled(rules, now: datetime):
+    """The soonest (time, action) any of these rules fire after now."""
     nxt = None
     for r in rules:
         at = r.next_after(now)
         if at and (nxt is None or at < nxt[0]):
             nxt = (at, r.action)
+    return nxt
+
+
+def _row(name, image, status, health, label_entry, config_entry, rules,
+         container, settings, now, plan_wait, holds) -> dict:
+    paused = name in holds["paused"]
+    skipping = None
+    nxt = next_scheduled(rules, now)
+    skip = holds["skip"].get(name)
+    if skip and rules:
+        try:
+            until = datetime.fromisoformat(skip).astimezone(settings.tz)
+        except ValueError:
+            until = None
+        if until and until >= now:
+            skipped = [r for r in rules if r.last_at_or_before(until) == until]
+            what = skipped[0].action if skipped else "next time"
+            skipping = f"{what} {until:%a %H:%M}"
+            nxt = next_scheduled(rules, until)
     order = min((r.order for r in rules), default=100)
     wait = None
     starts = [r for r in rules if r.action != "stop"]
@@ -159,7 +182,9 @@ def _row(name, image, status, health, label_entry, config_entry, rules,
                            key=lambda x: (x["when"][:5], x["action"])),
         "order": order,
         "wait": wait,
-        "next": f"{nxt[1]} {nxt[0]:%a %H:%M}" if nxt else None,
+        "next": f"{nxt[1]} {nxt[0]:%a %H:%M}" if nxt and not paused else None,
+        "paused": paused,
+        "skipping": skipping,
     }
 
 
@@ -254,6 +279,8 @@ class Handler(BaseHTTPRequestHandler):
             self._save_schedule(data)
         elif path == "/api/action":
             self._action(data)
+        elif path == "/api/hold":
+            self._hold(data)
         else:
             self._json(404, {"error": "not found"})
 
@@ -284,6 +311,14 @@ class Handler(BaseHTTPRequestHandler):
         log.info("%s (from web page)", msg)
         self._json(200, {"ok": True, "message": msg})
 
+    def _hold(self, data: dict) -> None:
+        try:
+            code, body = _hold_impl(self.app, data)
+        except Exception as e:  # Docker unreachable, file not writable, etc.
+            log.exception("could not change hold")
+            code, body = 500, {"error": str(e)}
+        self._json(code, body)
+
     def _action(self, data: dict) -> None:
         from .main import run_action
         from .schedule import Rule, ALL_DAYS
@@ -306,6 +341,51 @@ class Handler(BaseHTTPRequestHandler):
         threading.Thread(target=run_action, args=(a["client"], rule, a["settings"]),
                          daemon=True).start()
         self._json(202, {"ok": True, "message": f"{action.capitalize()} sent to {name}"})
+
+
+def _hold_impl(app, data: dict) -> tuple[int, dict]:
+    name = str(data.get("container") or "").strip()
+    what = data.get("hold")
+    settings = app["settings"]
+    holds = Holds(settings.state_path)
+    if not name:
+        return 400, {"error": "container is required"}
+    if what == "pause":
+        holds.set_paused(name, True)
+        msg = f"Paused the schedule for {name}"
+    elif what == "resume":
+        holds.set_paused(name, False)
+        msg = f"Resumed the schedule for {name}"
+    elif what == "skip":
+        nxt = next_scheduled(_rules_for(app, name), datetime.now(settings.tz))
+        if nxt is None:
+            return 400, {"error": f"{name} has no scheduled times to skip"}
+        holds.set_skip(name, nxt[0])
+        msg = f"Skipping {name}'s {nxt[1]} at {nxt[0]:%a %H:%M}"
+    elif what == "unskip":
+        holds.set_skip(name, None)
+        msg = f"{name} will run its next scheduled time as normal"
+    else:
+        return 400, {"error": "hold must be pause, resume, skip or unskip"}
+    log.info("%s (from web page)", msg)
+    return 200, {"ok": True, "message": msg}
+
+
+def _rules_for(app, name: str) -> list:
+    errors: list[str] = []
+    rules = []
+    try:
+        c = app["client"].containers.get(name)
+        rules += rules_from_labels(c.name, c.labels or {}, errors)
+    except NotFound:
+        pass
+    try:
+        entry = (read_config(app["settings"].config_path).get("containers") or {}).get(name)
+    except yaml.YAMLError:
+        entry = None
+    if isinstance(entry, dict):
+        rules += rules_from_config({"containers": {name: entry}}, errors)
+    return rules
 
 
 def start_web(client, settings, own_id) -> ThreadingHTTPServer | None:

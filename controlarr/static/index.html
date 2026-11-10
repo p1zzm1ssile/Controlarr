@@ -59,7 +59,16 @@
   .sched { margin: 0; padding: 0; list-style: none; font-size: 13px; }
   .sched .src { color: var(--muted); font-size: 11px; }
   .muted { color: var(--muted); font-size: 13px; }
-  .actions { white-space: nowrap; text-align: right; }
+  .actions { text-align: right; }
+  .actions .btns { display: inline-flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .held { display: block; font-size: 12px; color: var(--warn); }
+  h2.section { font-size: 15px; margin: 26px 0 10px; }
+  .activity { list-style: none; margin: 0; padding: 0; }
+  .activity li { display: flex; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .activity li:last-child { border-bottom: 0; }
+  .activity .when { color: var(--muted); font-size: 13px; min-width: 92px; font-variant-numeric: tabular-nums; }
+  .activity .problem { color: var(--bad); font-weight: 600; }
+  .activity .skipped { color: var(--muted); }
   button, select, input { font: inherit; color: inherit; }
   button { border: 1px solid var(--border); background: var(--panel); border-radius: 7px;
            padding: 5px 11px; cursor: pointer; }
@@ -102,6 +111,7 @@
     td { border: 0; padding: 4px 14px; }
     td[data-label]::before { content: attr(data-label) ": "; color: var(--muted); font-size: 12px; }
     .actions { text-align: left; }
+    .actions .btns { justify-content: flex-start; }
     .row2 { grid-template-columns: 1fr; }
   }
 </style>
@@ -135,7 +145,12 @@
     </table>
   </div>
   <p class="muted">When several containers are due to start at the same time, they start one by one,
-    lowest order first, waiting the time shown after each. Stops always happen before starts.</p>
+    lowest order first, waiting the time shown after each. Stops happen before starts, highest order
+    first, so apps stop before the VPN or database they rely on.</p>
+
+  <h2 class="section">Recent activity</h2>
+  <div class="panel"><ul class="activity" id="activity"><li class="muted">Nothing yet.</li></ul></div>
+  <p class="muted">Shows what happened since Controlarr last started. Problems are in red.</p>
 </main>
 
 <dialog id="editor">
@@ -237,6 +252,7 @@
     if (state.dry_run) b += `<div class="banner warn">Dry run is on: Controlarr logs what it would do but doesn't stop or start anything.</div>`;
     if (state.errors.length) b += `<div class="banner bad"><strong>Problems with some schedules:</strong><br>${state.errors.map(esc).join("<br>")}</div>`;
     $("banners").innerHTML = b;
+    renderActivity();
 
     const q = $("filter").value.trim().toLowerCase();
     const only = $("onlyScheduled").checked;
@@ -253,21 +269,41 @@
             `<li>${esc(cap(s.action))} ${esc(s.when)} <span class="src">${s.source === "label" ? "label" : ""}</span></li>`).join("")}</ul>`
         : `<span class="muted">Not scheduled</span>`;
       const running = c.status === "running" || c.status === "restarting";
+      const next = c.paused ? '<span class="pill paused">Paused</span>'
+        : (c.next ? esc(cap(c.next)) : '<span class="muted">–</span>')
+          + (c.skipping ? `<span class="held">Skipping ${esc(c.skipping)}</span>` : "");
+      const holdBtns = !c.scheduled ? "" :
+        `<button type="button" data-hold="${c.paused ? "resume" : "pause"}" data-name="${esc(c.name)}"
+           title="${c.paused ? "Run this schedule again" : "Stop this schedule running until you resume it"}">${c.paused ? "Resume" : "Pause"}</button>`
+        + (c.paused ? "" : `<button type="button" data-hold="${c.skipping ? "unskip" : "skip"}" data-name="${esc(c.name)}"
+           title="${c.skipping ? "Run the next time as normal" : "Skip only the next scheduled time"}">${c.skipping ? "Undo skip" : "Skip next"}</button>`);
       const missing = c.status === "missing";
       return `<tr>
         <td data-label="Container"><div class="name">${esc(c.name)}</div><div class="image">${esc(c.image)}</div></td>
         <td data-label="Status"><span class="pill ${esc(status)}">${esc(cap(status))}</span></td>
         <td data-label="Schedule">${sched}</td>
-        <td data-label="Next">${c.next ? esc(cap(c.next)) : '<span class="muted">–</span>'}</td>
+        <td data-label="Next">${next}</td>
         <td data-label="Order">${c.scheduled ? c.order : '<span class="muted">–</span>'}</td>
         <td data-label="Wait">${c.wait ? esc(c.wait) : '<span class="muted">–</span>'}</td>
-        <td class="actions">
+        <td class="actions"><div class="btns">
           <button type="button" data-edit="${esc(c.name)}">${c.scheduled ? "Edit" : "Schedule"}</button>
           ${missing ? "" : `<button type="button" data-now="${running ? "stop" : "start"}" data-name="${esc(c.name)}">${running ? "Stop now" : "Start now"}</button>`}
-        </td></tr>`;
+          ${holdBtns}
+        </div></td></tr>`;
     }).join("");
   }
   const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+
+  function renderActivity() {
+    const items = state.activity || [];
+    if (!items.length) { $("activity").innerHTML = '<li class="muted">Nothing yet.</li>'; return; }
+    $("activity").innerHTML = items.map(a => {
+      // a.time is ISO in Controlarr's timezone: show it as "10/11 02:00".
+      const when = a.time.slice(8, 10) + "/" + a.time.slice(5, 7) + " " + a.time.slice(11, 16);
+      const src = a.source === "web page" ? " (from this page)" : a.source === "catch-up" ? " (catching up)" : "";
+      return `<li><span class="when">${esc(when)}</span><span class="${esc(a.level)}">${esc(a.container)}: ${esc(a.text)}${esc(src)}</span></li>`;
+    }).join("");
+  }
 
   $("filter").addEventListener("input", () => state && render());
   $("onlyScheduled").addEventListener("change", () => {
@@ -279,6 +315,13 @@
   $("rows").addEventListener("click", async ev => {
     const edit = ev.target.closest("[data-edit]");
     if (edit) return openEditor(edit.dataset.edit);
+    const hold = ev.target.closest("[data-hold]");
+    if (hold) {
+      hold.disabled = true;
+      try { toast((await api("/api/hold", {container: hold.dataset.name, hold: hold.dataset.hold})).message); }
+      catch (e) { toast(e.message); }
+      return load();
+    }
     const now = ev.target.closest("[data-now]");
     if (now) {
       const action = now.dataset.now, name = now.dataset.name;

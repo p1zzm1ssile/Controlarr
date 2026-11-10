@@ -27,3 +27,40 @@ def test_healthz_needs_no_password(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+class OneContainer:
+    class C:
+        name, status, id = "sonarr", "running", "abc123"
+        labels = {"controlarr.stop": "02:00", "controlarr.start": "07:00"}
+        attrs = {"Config": {"Image": "lscr.io/linuxserver/sonarr"}, "State": {}}
+
+    class containers:
+        @staticmethod
+        def list(all=True):
+            return [OneContainer.C]
+
+        @staticmethod
+        def get(name):
+            from docker.errors import NotFound
+            if name != "sonarr":
+                raise NotFound(name)
+            return OneContainer.C
+
+
+def test_pause_and_skip_from_page(tmp_path):
+    from controlarr.web import _hold_impl, build_state
+    s = Settings({"CONTROLARR_CONFIG": str(tmp_path / "schedules.yml")})
+    app = {"client": OneContainer, "settings": s, "own_id": None}
+
+    code, body = _hold_impl(app, {"container": "sonarr", "hold": "skip"})
+    assert code == 200 and "Skipping sonarr's" in body["message"]
+    row = build_state(OneContainer, s, None)["containers"][0]
+    assert row["skipping"] and not row["paused"]
+
+    _hold_impl(app, {"container": "sonarr", "hold": "pause"})
+    row = build_state(OneContainer, s, None)["containers"][0]
+    assert row["paused"] and row["next"] is None
+
+    assert _hold_impl(app, {"container": "nope", "hold": "skip"})[0] == 400
+    assert _hold_impl(app, {"container": "sonarr", "hold": "melt"})[0] == 400
