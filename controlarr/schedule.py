@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from typing import Iterable, Mapping
 
 ACTIONS = ("stop", "start", "restart")
@@ -123,27 +123,51 @@ class Rule:
             d = ",".join(names[i] for i in sorted(self.days))
         return f"{self.at:%H:%M} {d}"
 
+    # Times are compared in UTC. Comparing local times directly goes wrong
+    # when the clocks change: when they go back, 01:30 happens twice and the
+    # rule would fire twice. A time skipped when the clocks go forward (01:30
+    # in the UK) fires an hour later instead of being missed.
+
+    def _fires_on(self, day, tz) -> datetime:
+        return datetime.combine(day, self.at, tzinfo=tz)
+
     def next_after(self, now: datetime) -> datetime | None:
         """The next time this rule fires after now."""
         day = now.date()
         for _ in range(8):
             if day.weekday() in self.days:
-                at = datetime.combine(day, self.at, tzinfo=now.tzinfo)
-                if at > now:
+                at = self._fires_on(day, now.tzinfo)
+                if _utc(at) > _utc(now):
                     return at
             day += timedelta(days=1)
         return None
 
+    def last_at_or_before(self, now: datetime) -> datetime | None:
+        """The most recent time this rule fired, up to and including now."""
+        day = now.date()
+        for _ in range(8):
+            if day.weekday() in self.days:
+                at = self._fires_on(day, now.tzinfo)
+                if _utc(at) <= _utc(now):
+                    return at
+            day -= timedelta(days=1)
+        return None
+
     def is_due(self, since: datetime, now: datetime) -> bool:
         """True if this time falls in the window (since, now]."""
-        day = since.date()
+        start, end = _utc(since), _utc(now)
+        day = since.date() - timedelta(days=1)
         while day <= now.date():
             if day.weekday() in self.days:
-                at = datetime.combine(day, self.at, tzinfo=now.tzinfo)
-                if since < at <= now:
+                at = _utc(self._fires_on(day, now.tzinfo))
+                if start < at <= end:
                     return True
             day += timedelta(days=1)
         return False
+
+
+def _utc(d: datetime) -> datetime:
+    return d.astimezone(timezone.utc)
 
 
 def _make_rules(container: str, mapping: Mapping[str, object], source: str,
@@ -153,8 +177,10 @@ def _make_rules(container: str, mapping: Mapping[str, object], source: str,
     except ScheduleError as e:
         errors.append(f"{container}: days: {e}")
         return []
+    order = 100
     try:
-        order = int(mapping.get("order") or 100)
+        if mapping.get("order") not in (None, ""):
+            order = int(str(mapping["order"]).strip())
     except (TypeError, ValueError):
         errors.append(f"{container}: order: {mapping.get('order')!r} is not a whole number")
         order = 100
@@ -211,12 +237,43 @@ def rules_from_config(config: Mapping | None, errors: list[str]) -> list[Rule]:
 def due_rules(rules: Iterable[Rule], since: datetime, now: datetime) -> list[Rule]:
     due = [r for r in rules if r.is_due(since, now)]
     # De-duplicate (same container+action from label and config) and order:
-    # all stops first, then restarts and starts by their "order" value.
+    # all stops first, highest "order" first (the reverse of starting, so apps
+    # stop before the VPN or database they rely on), then restarts and starts
+    # lowest "order" first.
+    def key(r):
+        is_stop = r.action == "stop"
+        return (not is_stop, -r.order if is_stop else r.order, r.container,
+                ACTION_ORDER[r.action])
+
     seen, out = set(), []
-    for r in sorted(due, key=lambda r: (ACTION_ORDER[r.action] > 0, r.order,
-                                        r.container, ACTION_ORDER[r.action])):
+    for r in sorted(due, key=key):
         key = (r.container, r.action)
         if key not in seen:
             seen.add(key)
             out.append(r)
     return out
+
+
+def desired_states(rules: Iterable[Rule], now: datetime) -> dict[str, tuple[str, Rule]]:
+    """For containers with both a start and a stop time, whether each should be
+    running right now: {container: ("start" or "stop", the rule that decided)}.
+
+    Containers with only a stop time (or only a start time) are left out, so a
+    container you start by hand after its stop time isn't stopped again."""
+    latest: dict[str, tuple[datetime, Rule]] = {}
+    actions: dict[str, set[str]] = {}
+    for r in rules:
+        if r.action not in ("start", "stop"):
+            continue
+        actions.setdefault(r.container, set()).add(r.action)
+        at = r.last_at_or_before(now)
+        if at is None:
+            continue
+        best = latest.get(r.container)
+        # On a tie (start and stop at the same minute) start wins: stops run
+        # first and the start follows, so the container ends up running.
+        if (best is None or _utc(at) > _utc(best[0])
+                or (_utc(at) == _utc(best[0]) and r.action == "start")):
+            latest[r.container] = (at, r)
+    return {name: (rule.action, rule) for name, (_, rule) in latest.items()
+            if actions[name] == {"start", "stop"}}

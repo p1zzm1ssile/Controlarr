@@ -1,2 +1,4 @@
 docker==7.1.0
 PyYAML==6.0.2
+# Timezone data, in case the base image no longer includes it.
+tzdata==2025.2

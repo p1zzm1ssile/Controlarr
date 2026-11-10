@@ -33,13 +33,14 @@ use **Check for Updates** on the Docker tab as with any other container.
 
 ## Install with Docker Compose
 
-The image is published at `ghcr.io/p1zzm1ssile/controlarr:latest`. Or build it yourself:
+The image is published at `ghcr.io/p1zzm1ssile/controlarr:latest`.
 
 ```sh
-git clone https://github.com/p1zzm1ssile/controlarr.git
-cd controlarr
-cp docker-compose.example.yml docker-compose.yml   # then edit TZ and your containers
-docker compose up -d --build controlarr
+mkdir controlarr && cd controlarr
+wget -O docker-compose.yml \
+  https://raw.githubusercontent.com/p1zzm1ssile/controlarr/main/docker-compose.example.yml
+# edit TZ and the example containers, then:
+docker compose up -d controlarr
 ```
 
 Then open `http://your-server:8080`.
@@ -47,15 +48,18 @@ Then open `http://your-server:8080`.
 To update later:
 
 ```sh
-cd controlarr && git pull && docker compose up -d --build controlarr
+docker compose pull controlarr && docker compose up -d controlarr
 ```
+
+To build the image yourself instead, clone this repository and swap the
+`image:` line in the compose file for `build: .`.
 
 ## Quick start
 
 ```yaml
 services:
   controlarr:
-    image: ghcr.io/p1zzm1ssile/controlarr:latest   # or build: .
+    image: ghcr.io/p1zzm1ssile/controlarr:latest
     container_name: controlarr
     restart: unless-stopped
     environment:
@@ -84,6 +88,15 @@ follows your device).
 Schedules added on the page are saved to `/config/schedules.yml`, so mount
 `/config` to keep them. Schedules set with labels show on the page but can
 only be changed in the labels.
+
+Use **Pause** to stop a container's schedule running until you click
+**Resume**, or **Skip next** to skip just its next scheduled time (for
+example to keep Plex running late one night). These are kept in
+`/config/state.json`, so they survive a restart.
+
+**Recent activity** at the bottom of the page shows what Controlarr has
+stopped, started and restarted since it last started, with any problems in
+red.
 
 Anyone who can open the page can stop and start your containers, so set
 `CONTROLARR_WEB_PASSWORD` if it's reachable by anyone but you (the username
@@ -115,8 +128,9 @@ Days can be written as `mon`, `monday`, `mon-fri`, `sat,sun`, `fri-mon`,
 
 When several containers are due to start at the same time, Controlarr starts
 them one at a time so they don't all hit the CPU, RAM and disks at once.
-All stops happen first, then starts go in `controlarr.order` (lowest first,
-ties by name).
+All stops happen first, highest `controlarr.order` first, so apps stop before
+the VPN or database they rely on. Then starts go in `controlarr.order`
+(lowest first, ties by name).
 
 After each start, Controlarr waits before starting the next one. The wait
 belongs to the container that just loaded, and is chosen like this:
@@ -172,12 +186,28 @@ containers:
 
 Quote the times in YAML (`"01:30"`), otherwise YAML may read them as numbers.
 
+## Alerts
+
+Set `CONTROLARR_NOTIFY_URL` to be told when something goes wrong, such as a
+container that fails to start or doesn't become healthy:
+
+- **Discord:** paste a channel webhook URL
+  (`https://discord.com/api/webhooks/...`).
+- **ntfy:** use your topic URL, for example `https://ntfy.sh/my-controlarr`,
+  then subscribe to that topic in the ntfy app.
+- Anything else that accepts a plain-text POST works too.
+
+Only problems are sent. Set `CONTROLARR_NOTIFY_ALL=true` to also get a
+message for every stop, start and restart.
+
 ## Settings
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `TZ` | `UTC` | Timezone the times are in |
 | `CONTROLARR_DRY_RUN` | `false` | Log what would happen without doing it |
+| `CONTROLARR_CATCH_UP` | `true` | On start, put containers into the state their schedule says (see below) |
+| `CONTROLARR_CATCH_UP_DELAY` | `120` | Seconds to wait after starting before catching up |
 | `CONTROLARR_POLL_SECONDS` | `30` | How often schedules are checked |
 | `CONTROLARR_STOP_TIMEOUT` | `30` | Seconds to wait for a clean stop |
 | `CONTROLARR_START_DELAY` | `30` | Wait after starting an app it doesn't recognise |
@@ -186,13 +216,28 @@ Quote the times in YAML (`"01:30"`), otherwise YAML may read them as numbers.
 | `CONTROLARR_LOG_LEVEL` | `INFO` | Log detail |
 | `CONTROLARR_WEB_PORT` | `8080` | Port for the web page (`0` turns it off) |
 | `CONTROLARR_WEB_PASSWORD` | (none) | Password for the web page |
+| `CONTROLARR_NOTIFY_URL` | (none) | Discord webhook or ntfy URL for alerts |
+| `CONTROLARR_NOTIFY_ALL` | `false` | Also alert on every stop, start and restart |
 
 ## Good to know
 
 - Labels and the schedule file are re-read on every check, so changes take
   effect without restarting Controlarr (labels change when a container is
   recreated).
-- A time that passed while Controlarr was down is not caught up on start.
+- **Catching up.** If Controlarr or your server was off when a time passed,
+  Controlarr fixes it when it starts. A container with both a start and a
+  stop time is put into the state it should be in now: so if your server
+  reboots at 03:00 and Unraid starts everything, Sonarr is stopped again
+  until 07:00. Containers with only a stop time or only a start time are left
+  alone, so ones you start by hand stay running. Controlarr waits
+  `CONTROLARR_CATCH_UP_DELAY` seconds first so the server has finished
+  starting its containers. On Unraid, if you use long autostart waits, put
+  Controlarr near the end of the autostart order. Set
+  `CONTROLARR_CATCH_UP=false` to turn this off. The same catch-up runs if
+  Controlarr loses contact with Docker for a while.
+- **Clock changes.** When the clocks go back, a time between 01:00 and 02:00
+  runs once, not twice. When they go forward, a time in the missing hour
+  (01:00 to 01:59 in the UK) runs an hour later instead of being skipped.
 - Use `restart: unless-stopped` on your containers. With `restart: always`,
   Docker will start a stopped container again if the Docker daemon restarts.
 - Controlarr needs the Docker socket, which gives it full control of Docker.

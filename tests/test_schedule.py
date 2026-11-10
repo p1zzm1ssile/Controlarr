@@ -112,3 +112,50 @@ def test_unquoted_yaml_time():
     config = yaml.safe_load("containers:\n  plex:\n    stop: 23:30\n    start: 07:00\n")
     rules = rules_from_config(config, [])
     assert sorted((r.action, r.at) for r in rules) == [("start", time(7, 0)), ("stop", time(23, 30))]
+
+
+def test_order_zero_kept():
+    errors = []
+    rules = rules_from_config({"containers": {"a": {"start": "07:00", "order": 0}}}, errors)
+    rules += rules_from_labels("b", {"controlarr.start": "07:00", "controlarr.order": "0"}, errors)
+    assert [r.order for r in rules] == [0, 0] and not errors
+
+
+def test_clocks_going_back_fire_once():
+    # 25 Oct 2026: UK clocks go back at 02:00 BST, so 01:00-01:59 happens twice.
+    [r] = rules_from_labels("x", {"controlarr.restart": "01:30"}, [])
+    first = datetime(2026, 10, 25, 1, 29, 50, tzinfo=TZ)
+    first_end = datetime(2026, 10, 25, 1, 30, 20, tzinfo=TZ)
+    second = datetime(2026, 10, 25, 1, 29, 50, tzinfo=TZ, fold=1)
+    second_end = datetime(2026, 10, 25, 1, 30, 20, tzinfo=TZ, fold=1)
+    assert r.is_due(first, first_end)
+    assert not r.is_due(second, second_end)
+    # Across the change itself (01:59:50 BST -> 01:00:20 GMT) nothing fires.
+    assert not r.is_due(datetime(2026, 10, 25, 1, 59, 50, tzinfo=TZ), second.replace(minute=0, second=20))
+
+
+def test_clocks_going_forward_not_missed():
+    # 29 Mar 2026: UK clocks jump from 01:00 GMT to 02:00 BST, so 01:30 never happens.
+    [r] = rules_from_labels("x", {"controlarr.stop": "01:30"}, [])
+    day = [(datetime(2026, 3, 29, h, m, tzinfo=TZ)) for h, m in
+           [(0, 30), (0, 59), (2, 0), (2, 29), (2, 30), (3, 0)]]
+    fired = [b for a, b in zip(day, day[1:]) if r.is_due(a, b)]
+    assert len(fired) == 1
+
+
+def test_desired_states():
+    from controlarr.schedule import desired_states
+    errors = []
+    rules = rules_from_labels("sonarr", {"controlarr.stop": "02:00",
+                                         "controlarr.start": "07:00"}, errors)
+    rules += rules_from_labels("weekend", {"controlarr.stop": "23:00",
+                                           "controlarr.start": "08:00",
+                                           "controlarr.days": "sat-sun"}, errors)
+    rules += rules_from_labels("stoponly", {"controlarr.stop": "02:00"}, errors)
+    rules += rules_from_labels("same", {"controlarr.stop": "03:00",
+                                        "controlarr.start": "03:00"}, errors)
+    got = {k: v[0] for k, v in desired_states(rules, dt(3, 3, 0)).items()}  # Tue 03:00
+    # weekend: last time was Sun 23:00, a stop. stoponly is left alone.
+    assert got == {"sonarr": "stop", "weekend": "stop", "same": "start"}
+    got = {k: v[0] for k, v in desired_states(rules, dt(7, 9, 0)).items()}  # Sat 09:00
+    assert got == {"sonarr": "start", "weekend": "start", "same": "start"}
