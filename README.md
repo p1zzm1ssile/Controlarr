@@ -178,6 +178,8 @@ Quote the times in YAML (`"01:30"`), otherwise YAML may read them as numbers.
 |---|---|---|
 | `TZ` | `UTC` | Timezone the times are in |
 | `CONTROLARR_DRY_RUN` | `false` | Log what would happen without doing it |
+| `CONTROLARR_CATCH_UP` | `true` | On start, put containers into the state their schedule says (see below) |
+| `CONTROLARR_CATCH_UP_DELAY` | `120` | Seconds to wait after starting before catching up |
 | `CONTROLARR_POLL_SECONDS` | `30` | How often schedules are checked |
 | `CONTROLARR_STOP_TIMEOUT` | `30` | Seconds to wait for a clean stop |
 | `CONTROLARR_START_DELAY` | `30` | Wait after starting an app it doesn't recognise |
@@ -192,7 +194,20 @@ Quote the times in YAML (`"01:30"`), otherwise YAML may read them as numbers.
 - Labels and the schedule file are re-read on every check, so changes take
   effect without restarting Controlarr (labels change when a container is
   recreated).
-- A time that passed while Controlarr was down is not caught up on start.
+- **Catching up.** If Controlarr or your server was off when a time passed,
+  Controlarr fixes it when it starts. A container with both a start and a
+  stop time is put into the state it should be in now: so if your server
+  reboots at 03:00 and Unraid starts everything, Sonarr is stopped again
+  until 07:00. Containers with only a stop time or only a start time are left
+  alone, so ones you start by hand stay running. Controlarr waits
+  `CONTROLARR_CATCH_UP_DELAY` seconds first so the server has finished
+  starting its containers. On Unraid, if you use long autostart waits, put
+  Controlarr near the end of the autostart order. Set
+  `CONTROLARR_CATCH_UP=false` to turn this off. The same catch-up runs if
+  Controlarr loses contact with Docker for a while.
+- **Clock changes.** When the clocks go back, a time between 01:00 and 02:00
+  runs once, not twice. When they go forward, a time in the missing hour
+  (01:00 to 01:59 in the UK) runs an hour later instead of being skipped.
 - Use `restart: unless-stopped` on your containers. With `restart: always`,
   Docker will start a stopped container again if the Docker daemon restarts.
 - Controlarr needs the Docker socket, which gives it full control of Docker.

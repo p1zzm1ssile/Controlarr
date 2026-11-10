@@ -9,4 +9,7 @@ COPY controlarr ./controlarr
 ENV TZ=UTC PYTHONUNBUFFERED=1
 VOLUME /config
 EXPOSE 8080
+# Checks the web page answers. With the page turned off (port 0) it always passes.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+  CMD ["python", "-m", "controlarr.healthcheck"]
 CMD ["python", "-m", "controlarr"]

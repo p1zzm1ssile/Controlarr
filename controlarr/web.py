@@ -16,6 +16,7 @@ import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 from docker.errors import NotFound
@@ -221,21 +222,24 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- routes
     def do_GET(self):
+        path = urlsplit(self.path).path
+        # The container healthcheck needs no password; it reveals nothing.
+        if path == "/healthz":
+            self._send(200, b"ok", "text/plain")
+            return
         if not self._authorised():
             return
-        if self.path in ("/", "/index.html"):
+        if path in ("/", "/index.html"):
             self._send(200, INDEX_HTML.read_bytes(), "text/html; charset=utf-8")
-        elif self.path in ("/logo.png", "/favicon.ico"):
+        elif path in ("/logo.png", "/favicon.ico"):
             self._send(200, LOGO_PNG.read_bytes(), "image/png")
-        elif self.path == "/api/state":
+        elif path == "/api/state":
             a = self.app
             try:
                 self._json(200, build_state(a["client"], a["settings"], a["own_id"]))
             except Exception as e:  # Docker unreachable, etc.
                 log.exception("could not build state")
                 self._json(500, {"error": str(e)})
-        elif self.path == "/healthz":
-            self._send(200, b"ok", "text/plain")
         else:
             self._json(404, {"error": "not found"})
 
@@ -245,9 +249,10 @@ class Handler(BaseHTTPRequestHandler):
         data = self._body()
         if data is None:
             return
-        if self.path == "/api/schedule":
+        path = urlsplit(self.path).path
+        if path == "/api/schedule":
             self._save_schedule(data)
-        elif self.path == "/api/action":
+        elif path == "/api/action":
             self._action(data)
         else:
             self._json(404, {"error": "not found"})
